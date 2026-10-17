@@ -48,7 +48,7 @@ class ProgressTests(unittest.TestCase):
         response.__enter__.return_value = response
         response.status_code = 206
         response.headers = {'Content-Length': '2', 'Content-Range': 'bytes 0-1/500000'}
-        with patch('downloader.video.requests.head', return_value=response):
+        with patch('requests.sessions.Session.send', return_value=response):
             self.assertEqual(get_file_size('https://meeting.tencent.com/test'), 500000)
 
     def test_ambiguous_partial_response_is_unknown(self):
@@ -56,7 +56,7 @@ class ProgressTests(unittest.TestCase):
         response.__enter__.return_value = response
         response.status_code = 206
         response.headers = {'Content-Length': '2'}
-        with patch('downloader.video.requests.head', return_value=response):
+        with patch('requests.sessions.Session.send', return_value=response):
             self.assertEqual(get_file_size('https://meeting.tencent.com/test'), 0)
 
     def test_head_full_response_and_no_range_request(self):
@@ -64,9 +64,9 @@ class ProgressTests(unittest.TestCase):
         response.__enter__.return_value = response
         response.status_code = 200
         response.headers = {'Content-Length': '500000'}
-        with patch('downloader.video.requests.head', return_value=response) as head:
+        with patch('requests.sessions.Session.send', return_value=response) as head:
             self.assertEqual(get_file_size('https://meeting.tencent.com/test'), 500000)
-            self.assertNotIn('Range', head.call_args.kwargs['headers'])
+            self.assertNotIn('Range', head.call_args.args[0].headers)
 
 
 if __name__ == '__main__':
