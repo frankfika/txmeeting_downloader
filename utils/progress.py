@@ -21,12 +21,14 @@ class ProgressBar:
             suffix (str): 后缀显示内容
             color (bool): 是否启用颜色
         """
-        self.total = total if total > 0 else 100  # 避免除以零错误
+        self.total = total if total > 0 else 0  # 0 表示未知大小
         self.width = width
         self.suffix = suffix
         self.color = color
-        self.start_time = time.time()
-        self.last_update = 0
+        self.start_time = time.monotonic()
+        self.last_update = None
+        self.current = 0
+        self.finished = False
         self.colors = {
             'green': '\033[92m',
             'yellow': '\033[93m',
@@ -62,55 +64,40 @@ class ProgressBar:
             return f"{self.colors.get(color_name, '')}{text}{self.colors['end']}"
         return text
     
-    def update(self, current):
-        """
-        更新进度条显示
-        
-        参数:
-            current (int): 当前进度
-        """
-        # 避免频繁更新导致闪烁
-        current_time = time.time()
-        if current_time - self.last_update < 0.1 and current < self.total:
+    def update(self, current, force=False):
+        """固定宽度、限速刷新；未知或不可信的总大小只显示已下载量。"""
+        if self.finished:
             return
-        self.last_update = current_time
-        
-        # 计算进度
-        percent = min(100, int(current / self.total * 100))
-        filled_width = int(self.width * current / self.total)
-        bar = '█' * filled_width + '-' * (self.width - filled_width)
-        
-        # 计算速度和剩余时间
-        elapsed = current_time - self.start_time
-        if elapsed > 0 and current > 0:
-            speed = current / elapsed
-            remaining = (self.total - current) / speed if speed > 0 else 0
-            elapsed_str = self._format_time(elapsed)
-            remaining_str = self._format_time(remaining)
-            speed_str = self._format_size(speed) + "/s"
-            progress_suffix = f"{self._format_size(current)}/{self._format_size(self.total)} | {speed_str} | {elapsed_str}<{remaining_str}"
+        self.current = max(0, current)
+        now = time.monotonic()
+        if not force and self.last_update is not None and now - self.last_update < 0.5:
+            return
+        self.last_update = now
+        elapsed = max(0, now - self.start_time)
+        speed = self.current / elapsed if elapsed > 0 else 0
+        if self.total > 0 and self.current <= self.total:
+            ratio = min(1, self.current / self.total)
+            filled = min(self.width, max(0, int(self.width * ratio)))
+            bar = '█' * filled + '-' * (self.width - filled)
+            label = f"{int(ratio * 100)}%"
+            size = f"{self._format_size(self.current)}/{self._format_size(self.total)}"
+            remaining = (self.total - self.current) / speed if speed else 0
+            timing = f"{self._format_time(elapsed)}<{self._format_time(remaining)}"
         else:
-            progress_suffix = f"{self._format_size(current)}/{self._format_size(self.total)}"
-        
-        # 构建进度条显示
-        if self.color:
-            if percent < 30:
-                bar_colored = self._get_color(bar, 'yellow')
-            elif percent < 60:
-                bar_colored = self._get_color(bar, 'blue')
-            else:
-                bar_colored = self._get_color(bar, 'green')
-        else:
-            bar_colored = bar
-        
-        # 显示进度条
-        sys.stdout.write(f"\r[{bar_colored}] {percent}% | {progress_suffix} {self.suffix}")
+            bar = '-' * self.width
+            label = '大小未知'
+            size = self._format_size(self.current)
+            timing = self._format_time(elapsed)
+        bar = self._get_color(bar, 'green')
+        sys.stdout.write(
+            f"\r[{bar}] {label} | {size} | {self._format_size(speed)}/s | {timing} {self.suffix}    "
+        )
         sys.stdout.flush()
-        
-        # 完成时换行
-        if current >= self.total:
-            sys.stdout.write('\n')
-    
+
     def finish(self):
-        """完成进度，显示最终结果"""
-        self.update(self.total) 
+        """保留实际下载字节数，只在真正结束时换行。"""
+        if not self.finished:
+            self.update(self.current, force=True)
+            self.finished = True
+            sys.stdout.write('\n')
+            sys.stdout.flush()
